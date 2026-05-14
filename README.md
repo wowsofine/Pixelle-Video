@@ -243,6 +243,16 @@ uv run streamlit run web/app.py
 
 浏览器会自动打开 http://localhost:8501
 
+#### 可选：本地环境预检
+
+如果想先确认 Python、uv、ffmpeg、`config.yaml` 和 Web 服务状态，可运行：
+
+```bash
+uv run python scripts/preflight.py
+```
+
+该预检默认只做本地离线检查，不会调用 LLM、RunningHub 或 ComfyUI 生成接口，也不会打印任何 API Key 明文。
+
 #### 第三步：在 Web 界面配置
 
 首次使用时，展开「⚙️ 系统配置」面板，填写：
@@ -433,4 +443,3 @@ Pixelle-Video 的设计受到以下优秀开源项目的启发：
 ## ⭐ Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=AIDC-AI/Pixelle-Video&type=Date)](https://star-history.com/#AIDC-AI/Pixelle-Video&Date)
-
