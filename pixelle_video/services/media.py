@@ -17,13 +17,27 @@ Supports both image and video generation workflows.
 Automatically detects output type based on ExecuteResult.
 """
 
+import os
+from pathlib import Path
 from typing import Optional
 
-from comfykit import ComfyKit
 from loguru import logger
 
-from pixelle_video.services.comfy_base_service import ComfyBaseService
 from pixelle_video.models.media import MediaResult
+from pixelle_video.services.comfy_base_service import ComfyBaseService
+from pixelle_video.services.cpa_image import (
+    DEFAULT_BASE_URL,
+    DEFAULT_IMAGE_MODEL,
+    DEFAULT_MAIN_MODEL,
+    choose_cpa_image_size,
+    generate_cpa_image,
+)
+from pixelle_video.utils.os_util import (
+    get_output_path,
+    get_resource_path,
+    list_resource_dirs,
+    list_resource_files,
+)
 
 
 class MediaService(ComfyBaseService):
@@ -54,6 +68,7 @@ class MediaService(ComfyBaseService):
     WORKFLOW_PREFIX = ""  # Will be overridden by _scan_workflows
     DEFAULT_WORKFLOW = None  # No hardcoded default, must be configured
     WORKFLOWS_DIR = "workflows"
+    CPA_WORKFLOW_KEY = "cpa/gpt-image-2"
     
     def __init__(self, config: dict, core=None):
         """
@@ -71,9 +86,9 @@ class MediaService(ComfyBaseService):
         
         Override parent method to support multiple prefixes
         """
-        from pixelle_video.utils.os_util import list_resource_dirs, list_resource_files, get_resource_path
-        from pathlib import Path
-        
+        if self._workflows_cache is not None:
+            return self._workflows_cache
+
         workflows = []
         
         # Get all workflow source directories
@@ -103,9 +118,92 @@ class MediaService(ComfyBaseService):
                     logger.debug(f"Found workflow: {workflow_info['key']}")
                 except Exception as e:
                     logger.error(f"Failed to parse workflow {source_name}/{filename}: {e}")
+
+        workflows.append({
+            "name": "gpt-image-2",
+            "display_name": "gpt-image-2 - Local CPA",
+            "source": "cpa",
+            "path": self.CPA_WORKFLOW_KEY,
+            "key": self.CPA_WORKFLOW_KEY,
+            "model": DEFAULT_IMAGE_MODEL,
+        })
         
         # Sort by key (source/name)
-        return sorted(workflows, key=lambda w: w["key"])
+        self._workflows_cache = sorted(workflows, key=lambda w: w["key"])
+        return self._workflows_cache
+
+    def _get_cpa_output_path(
+        self,
+        *,
+        task_id: Optional[str],
+        index: Optional[int],
+        output_path: Optional[str],
+        output_format: Optional[str],
+    ) -> str:
+        """Choose a stable local output path for a CPA-generated image."""
+        if output_path:
+            return output_path
+
+        if task_id is not None and index is not None:
+            from pixelle_video.utils.os_util import get_task_frame_path
+            return get_task_frame_path(task_id, int(index) - 1, "image")
+
+        ext = (output_format or "png").lower()
+        if ext == "jpeg":
+            ext = "jpg"
+
+        import uuid
+
+        return get_output_path("cpa_previews", f"{uuid.uuid4().hex[:12]}.{ext}")
+
+    async def _generate_cpa_image(
+        self,
+        *,
+        prompt: str,
+        media_type: str,
+        width: Optional[int],
+        height: Optional[int],
+        params: dict,
+    ) -> MediaResult:
+        """Generate an image through the local CPA route."""
+        if media_type != "image":
+            raise ValueError(
+                "CPA workflow cpa/gpt-image-2 only supports image generation. "
+                "Use an image template, or choose a RunningHub/ComfyUI video workflow for video media."
+            )
+
+        from pixelle_video.config import config_manager
+
+        llm_config = config_manager.get_llm_config()
+        api_key = params.get("cpa_api_key") or llm_config.get("api_key") or os.getenv("CPA_API_KEY")
+        base_url = params.get("cpa_base_url") or llm_config.get("base_url") or os.getenv("CPA_BASE_URL") or DEFAULT_BASE_URL
+        main_model = params.get("cpa_main_model") or llm_config.get("model") or DEFAULT_MAIN_MODEL
+        image_model = params.get("cpa_image_model") or DEFAULT_IMAGE_MODEL
+        output_format = params.get("cpa_output_format")
+        size = params.get("cpa_size") or choose_cpa_image_size(width, height)
+
+        output_path = self._get_cpa_output_path(
+            task_id=params.get("task_id"),
+            index=params.get("index"),
+            output_path=params.get("output_path"),
+            output_format=output_format,
+        )
+
+        logger.info(f"Executing local CPA image workflow: {self.CPA_WORKFLOW_KEY}")
+        local_path = await generate_cpa_image(
+            prompt=prompt,
+            output_path=output_path,
+            api_key=api_key,
+            base_url=base_url,
+            main_model=main_model,
+            image_model=image_model,
+            size=size,
+            quality=params.get("cpa_quality"),
+            output_format=output_format,
+            timeout=float(params.get("cpa_timeout", 120.0)),
+        )
+
+        return MediaResult(media_type="image", url=local_path)
     
     async def __call__(
         self,
@@ -196,6 +294,15 @@ class MediaService(ComfyBaseService):
         """
         # 1. Resolve workflow (returns structured info)
         workflow_info = self._resolve_workflow(workflow=workflow)
+
+        if workflow_info["source"] == "cpa":
+            return await self._generate_cpa_image(
+                prompt=prompt,
+                media_type=media_type,
+                width=width,
+                height=height,
+                params=params,
+            )
         
         # 2. Build workflow parameters (ComfyKit config is now managed by core)
         workflow_params = {"prompt": prompt}

@@ -35,6 +35,7 @@ comfyui:
     # Required: Default workflow to use (no fallback)
     # Options: runninghub/image_flux.json (recommended, no local setup)
     #          selfhost/image_flux.json (requires local ComfyUI)
+    #          cpa/gpt-image-2 (uses local CPA / CLIProxyAPI, no RunningHub/ComfyUI)
     default_workflow: runninghub/image_flux.json
     
     # Image prompt prefix (optional)

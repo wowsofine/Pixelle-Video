@@ -288,6 +288,11 @@ uv run python scripts/preflight.py
 #### 2. 图像配置
 用于生成视频配图的 AI。
 
+**本机 CPA（适合本机已配置 CLIProxyAPI 的用户）**
+- 图像工作流选择 `gpt-image-2 - Local CPA`
+- 配置会复用「LLM 配置」里的 Base URL、Model 和 API Key；本机默认地址通常是 `http://127.0.0.1:8317/v1`
+- 这条路线只负责生成图片，不需要 RunningHub 或本地 ComfyUI；视频模板请选 `image_*.html`
+
 **本地部署（推荐）**  
 - ComfyUI URL: 本地 ComfyUI 服务地址（默认 http://127.0.0.1:8188）
 - 点击「测试连接」确认服务可用
@@ -339,6 +344,7 @@ uv run python scripts/preflight.py
 **ComfyUI 工作流**  
 - 从下拉菜单选择图像生成工作流
 - 支持本地部署（selfhost）和云端（RunningHub）工作流
+- 已配置本机 CPA 时，也可以选择 `gpt-image-2 - Local CPA` 来生成插画配图
 - 默认使用 `image_flux.json`
 - 如果懂 ComfyUI，可以放自己的工作流到 `workflows/` 文件夹
 
