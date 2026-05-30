@@ -13,8 +13,8 @@
 """
 Local CPA image generation helper.
 
-Uses the local CLIProxyAPI/CPA OpenAI-compatible Responses API with the
-image_generation tool. This keeps image generation local to the user's proxy
+Uses the local CLIProxyAPI/CPA OpenAI-compatible images generation endpoint.
+This keeps image generation local to the user's proxy
 instead of requiring RunningHub or a self-hosted ComfyUI workflow.
 """
 
@@ -29,7 +29,7 @@ import httpx
 from loguru import logger
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8317/v1"
-DEFAULT_MAIN_MODEL = "gpt-5.4"
+DEFAULT_MAIN_MODEL = "gpt-5.4-mini"
 DEFAULT_IMAGE_MODEL = "gpt-image-2"
 DEFAULT_SQUARE_SIZE = "1024x1024"
 DEFAULT_PORTRAIT_SIZE = "1024x1536"
@@ -56,24 +56,19 @@ def build_cpa_image_payload(
     quality: Optional[str] = None,
     output_format: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Build a minimal local CPA image_generation request payload."""
-    image_tool: dict[str, Any] = {
-        "type": "image_generation",
-        "action": "generate",
+    """Build a minimal local CPA images generation request payload."""
+    payload: dict[str, Any] = {
         "model": image_model,
+        "prompt": prompt,
         "size": size,
+        "response_format": "b64_json",
     }
     if quality:
-        image_tool["quality"] = quality
+        payload["quality"] = quality
     if output_format:
-        image_tool["output_format"] = output_format
+        payload["output_format"] = output_format
 
-    return {
-        "model": main_model,
-        "input": prompt,
-        "tools": [image_tool],
-        "tool_choice": {"type": "image_generation"},
-    }
+    return payload
 
 
 def _strip_data_url_prefix(value: str) -> str:
@@ -84,7 +79,15 @@ def _strip_data_url_prefix(value: str) -> str:
 
 
 def extract_image_b64(response: dict[str, Any]) -> str:
-    """Extract a generated image base64 payload from a Responses API result."""
+    """Extract a generated image base64 payload from a CPA image result."""
+    for item in response.get("data", []):
+        if not isinstance(item, dict):
+            continue
+        for key in ("b64_json", "b64", "image_base64", "result"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return _strip_data_url_prefix(value.strip())
+
     for item in response.get("output", []):
         if not isinstance(item, dict):
             continue
@@ -140,7 +143,7 @@ async def generate_cpa_image(
         output_format=output_format,
     )
 
-    endpoint = f"{base_url.rstrip('/')}/responses"
+    endpoint = f"{base_url.rstrip('/')}/images/generations"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",

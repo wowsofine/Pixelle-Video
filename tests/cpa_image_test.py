@@ -15,7 +15,7 @@ from pixelle_video.services.cpa_image import (
 from pixelle_video.services.media import MediaService
 
 
-def test_build_cpa_image_payload_uses_image_generation_tool():
+def test_build_cpa_image_payload_uses_images_endpoint_shape():
     payload = build_cpa_image_payload(
         "Hong Kong company registration concept art",
         main_model="gpt-5.4",
@@ -23,17 +23,19 @@ def test_build_cpa_image_payload_uses_image_generation_tool():
         size="1024x1536",
     )
 
-    assert payload["model"] == "gpt-5.4"
-    assert payload["input"] == "Hong Kong company registration concept art"
-    assert payload["tool_choice"] == {"type": "image_generation"}
-    assert payload["tools"] == [
-        {
-            "type": "image_generation",
-            "action": "generate",
-            "model": "gpt-image-2",
-            "size": "1024x1536",
-        }
-    ]
+    assert payload == {
+        "model": "gpt-image-2",
+        "prompt": "Hong Kong company registration concept art",
+        "size": "1024x1536",
+        "response_format": "b64_json",
+    }
+
+
+def test_extract_image_b64_from_images_api_result():
+    expected = base64.b64encode(b"fake-png").decode()
+    response = {"data": [{"b64_json": expected}]}
+
+    assert extract_image_b64(response) == expected
 
 
 def test_extract_image_b64_from_image_generation_result():
