@@ -74,3 +74,6 @@ examples/
 repositories/
 
 *.out
+
+# Local marketing drafts and generated sample clips
+marketing_samples/
