@@ -27,11 +27,13 @@ from pixelle_video.models.media import MediaResult
 from pixelle_video.services.comfy_base_service import ComfyBaseService
 from pixelle_video.services.cpa_image import (
     DEFAULT_BASE_URL,
+    DEFAULT_CHAT_IMAGE_MODEL,
     DEFAULT_IMAGE_MODEL,
     DEFAULT_MAIN_MODEL,
     DEFAULT_TIMEOUT,
     choose_cpa_image_size,
     generate_cpa_image,
+    generate_cpa_image_from_chat,
 )
 from pixelle_video.utils.os_util import (
     get_output_path,
@@ -70,6 +72,7 @@ class MediaService(ComfyBaseService):
     DEFAULT_WORKFLOW = None  # No hardcoded default, must be configured
     WORKFLOWS_DIR = "workflows"
     CPA_WORKFLOW_KEY = "cpa/gpt-image-2"
+    ANTIGRAVITY_IMAGE_WORKFLOW_KEY = "antigravity/gemini-3.1-flash-image"
     
     def __init__(self, config: dict, core=None):
         """
@@ -127,6 +130,14 @@ class MediaService(ComfyBaseService):
             "path": self.CPA_WORKFLOW_KEY,
             "key": self.CPA_WORKFLOW_KEY,
             "model": DEFAULT_IMAGE_MODEL,
+        })
+        workflows.append({
+            "name": DEFAULT_CHAT_IMAGE_MODEL,
+            "display_name": f"{DEFAULT_CHAT_IMAGE_MODEL} - Antigravity",
+            "source": "antigravity",
+            "path": self.ANTIGRAVITY_IMAGE_WORKFLOW_KEY,
+            "key": self.ANTIGRAVITY_IMAGE_WORKFLOW_KEY,
+            "model": DEFAULT_CHAT_IMAGE_MODEL,
         })
         
         # Sort by key (source/name)
@@ -202,6 +213,57 @@ class MediaService(ComfyBaseService):
             quality=params.get("cpa_quality"),
             output_format=output_format,
             timeout=float(params.get("cpa_timeout", DEFAULT_TIMEOUT)),
+        )
+
+        return MediaResult(media_type="image", url=local_path)
+
+    async def _generate_antigravity_image(
+        self,
+        *,
+        prompt: str,
+        media_type: str,
+        params: dict,
+    ) -> MediaResult:
+        """Generate an image through CPA's Antigravity chat-image route."""
+        if media_type != "image":
+            raise ValueError(
+                "Antigravity workflow antigravity/gemini-3.1-flash-image only supports "
+                "image generation. Use an image template, or choose a video workflow."
+            )
+
+        from pixelle_video.config import config_manager
+
+        llm_config = config_manager.get_llm_config()
+        api_key = (
+            params.get("antigravity_api_key")
+            or params.get("cpa_api_key")
+            or llm_config.get("api_key")
+            or os.getenv("CPA_API_KEY")
+        )
+        base_url = (
+            params.get("antigravity_base_url")
+            or params.get("cpa_base_url")
+            or llm_config.get("base_url")
+            or os.getenv("CPA_BASE_URL")
+            or DEFAULT_BASE_URL
+        )
+        image_model = params.get("antigravity_image_model") or DEFAULT_CHAT_IMAGE_MODEL
+
+        output_path = self._get_cpa_output_path(
+            task_id=params.get("task_id"),
+            index=params.get("index"),
+            output_path=params.get("output_path"),
+            output_format=params.get("antigravity_output_format") or "jpg",
+        )
+
+        logger.info(f"Executing Antigravity chat image workflow: {self.ANTIGRAVITY_IMAGE_WORKFLOW_KEY}")
+        local_path = await generate_cpa_image_from_chat(
+            prompt=prompt,
+            output_path=output_path,
+            api_key=api_key,
+            base_url=base_url,
+            image_model=image_model,
+            timeout=float(params.get("antigravity_timeout", params.get("cpa_timeout", DEFAULT_TIMEOUT))),
         )
 
         return MediaResult(media_type="image", url=local_path)
@@ -302,6 +364,12 @@ class MediaService(ComfyBaseService):
                 media_type=media_type,
                 width=width,
                 height=height,
+                params=params,
+            )
+        if workflow_info["source"] == "antigravity":
+            return await self._generate_antigravity_image(
+                prompt=prompt,
+                media_type=media_type,
                 params=params,
             )
         

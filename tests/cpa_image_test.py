@@ -13,7 +13,9 @@ from pixelle_video.services.cpa_image import (
     build_cpa_image_payload,
     choose_cpa_image_size,
     extract_image_b64,
+    extract_openai_chat_image_b64,
     generate_cpa_image,
+    generate_cpa_image_from_chat,
 )
 from pixelle_video.services.media import MediaService
 
@@ -60,6 +62,28 @@ def test_extract_image_b64_rejects_missing_result():
         extract_image_b64({"output": [{"type": "message", "content": []}]})
 
 
+def test_extract_openai_chat_image_b64_from_message_images():
+    expected = base64.b64encode(b"fake-jpeg").decode()
+    response = {
+        "choices": [
+            {
+                "message": {
+                    "images": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{expected}",
+                            },
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+
+    assert extract_openai_chat_image_b64(response) == expected
+
+
 def test_choose_cpa_image_size_matches_aspect_ratio():
     assert choose_cpa_image_size(1080, 1920) == "1024x1536"
     assert choose_cpa_image_size(1920, 1080) == "1536x1024"
@@ -75,6 +99,11 @@ def test_media_service_lists_local_cpa_workflow():
     assert any(
         workflow["key"] == "cpa/gpt-image-2"
         and workflow["display_name"] == "gpt-image-2 - Local CPA"
+        for workflow in workflows
+    )
+    assert any(
+        workflow["key"] == "antigravity/gemini-3.1-flash-image"
+        and workflow["display_name"] == "gemini-3.1-flash-image - Antigravity"
         for workflow in workflows
     )
 
@@ -118,6 +147,50 @@ async def test_media_service_passes_configured_cpa_models(monkeypatch, tmp_path)
     assert captured["main_model"] == "gpt-5.4-mini"
     assert captured["image_model"] == "gpt-image-2"
     assert captured["size"] == "1024x1536"
+    assert captured["timeout"] == 300.0
+
+
+async def test_media_service_routes_antigravity_chat_image_workflow(monkeypatch, tmp_path):
+    output_path = tmp_path / "gemini.jpg"
+    captured = {}
+
+    from pixelle_video.config import config_manager
+
+    monkeypatch.setattr(
+        config_manager,
+        "get_llm_config",
+        lambda: {
+            "api_key": "local-test-key",
+            "base_url": "http://127.0.0.1:8317/v1",
+            "model": "gpt-5.4-mini",
+        },
+    )
+
+    async def fake_generate_cpa_image_from_chat(**kwargs):
+        captured.update(kwargs)
+        return str(output_path)
+
+    monkeypatch.setattr(
+        media_module,
+        "generate_cpa_image_from_chat",
+        fake_generate_cpa_image_from_chat,
+    )
+
+    service = MediaService({"comfyui": {"image": {"default_workflow": "cpa/gpt-image-2"}}})
+    result = await service(
+        prompt="Hong Kong CPA office illustration",
+        workflow="antigravity/gemini-3.1-flash-image",
+        media_type="image",
+        width=1080,
+        height=1920,
+        output_path=str(output_path),
+    )
+
+    assert result.media_type == "image"
+    assert result.url == str(output_path)
+    assert captured["api_key"] == "local-test-key"
+    assert captured["base_url"] == "http://127.0.0.1:8317/v1"
+    assert captured["image_model"] == "gemini-3.1-flash-image"
     assert captured["timeout"] == 300.0
 
 
@@ -276,3 +349,61 @@ async def test_generate_cpa_image_does_not_retry_auth_errors(monkeypatch, tmp_pa
         )
 
     assert len(calls) == 1
+
+
+async def test_generate_cpa_image_from_chat_saves_message_image(monkeypatch, tmp_path):
+    expected_b64 = base64.b64encode(b"fake-jpeg").decode()
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "images": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{expected_b64}",
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, endpoint, json, headers):
+            calls.append({"endpoint": endpoint, "timeout": self.timeout, "payload": json})
+            return FakeResponse()
+
+    monkeypatch.setattr(cpa_image_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    out = tmp_path / "gemini.jpg"
+    result = await generate_cpa_image_from_chat(
+        prompt="Hong Kong office tower",
+        output_path=str(out),
+        api_key="local-test-key",
+        image_model="gemini-3.1-flash-image",
+    )
+
+    assert result == str(out.resolve())
+    assert out.read_bytes() == b"fake-jpeg"
+    assert calls[0]["endpoint"] == "http://127.0.0.1:8317/v1/chat/completions"
+    assert calls[0]["timeout"] == 300.0
+    assert calls[0]["payload"]["model"] == "gemini-3.1-flash-image"
+    assert calls[0]["payload"]["messages"][0]["content"] == "Hong Kong office tower"

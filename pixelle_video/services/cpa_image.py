@@ -32,6 +32,7 @@ from loguru import logger
 DEFAULT_BASE_URL = "http://127.0.0.1:8317/v1"
 DEFAULT_MAIN_MODEL = "gpt-5.4-mini"
 DEFAULT_IMAGE_MODEL = "gpt-image-2"
+DEFAULT_CHAT_IMAGE_MODEL = "gemini-3.1-flash-image"
 DEFAULT_SQUARE_SIZE = "1024x1024"
 DEFAULT_PORTRAIT_SIZE = "1024x1536"
 DEFAULT_LANDSCAPE_SIZE = "1536x1024"
@@ -113,6 +114,40 @@ def extract_image_b64(response: dict[str, Any]) -> str:
     raise RuntimeError("CPA image response did not contain an image result.")
 
 
+def extract_openai_chat_image_b64(response: dict[str, Any]) -> str:
+    """Extract an image data URL payload from OpenAI-compatible chat output."""
+    for choice in response.get("choices", []):
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message") or {}
+        if not isinstance(message, dict):
+            continue
+
+        for image in message.get("images", []) or []:
+            if not isinstance(image, dict):
+                continue
+            image_url = image.get("image_url") or {}
+            if isinstance(image_url, dict):
+                url = image_url.get("url")
+            else:
+                url = image_url
+            if isinstance(url, str) and url.strip():
+                return _strip_data_url_prefix(url.strip())
+
+        for part in message.get("content", []) or []:
+            if not isinstance(part, dict):
+                continue
+            image_url = part.get("image_url") or {}
+            if isinstance(image_url, dict):
+                url = image_url.get("url")
+            else:
+                url = image_url
+            if isinstance(url, str) and url.strip():
+                return _strip_data_url_prefix(url.strip())
+
+    raise RuntimeError("CPA chat image response did not contain an image result.")
+
+
 async def generate_cpa_image(
     *,
     prompt: str,
@@ -192,4 +227,78 @@ async def generate_cpa_image(
     path.write_bytes(image_bytes)
 
     logger.info(f"✅ Generated CPA image: {path}")
+    return str(path)
+
+
+async def generate_cpa_image_from_chat(
+    *,
+    prompt: str,
+    output_path: str,
+    api_key: str,
+    base_url: str = DEFAULT_BASE_URL,
+    image_model: str = DEFAULT_CHAT_IMAGE_MODEL,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_delay: float = DEFAULT_RETRY_DELAY,
+) -> str:
+    """
+    Generate an image through an OpenAI-compatible chat endpoint.
+
+    Some CPA routes expose Gemini image models as chat completions that return
+    images in message.images rather than /images/generations.
+    """
+    api_key = api_key or os.getenv("CPA_API_KEY")
+    if not api_key:
+        raise RuntimeError("CPA chat image generation requires llm.api_key or CPA_API_KEY.")
+    if not base_url:
+        base_url = DEFAULT_BASE_URL
+
+    endpoint = f"{base_url.rstrip('/')}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": image_model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 200,
+    }
+
+    attempts = max(1, max_retries + 1)
+    for attempt in range(1, attempts + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(endpoint, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+            break
+        except httpx.HTTPStatusError as exc:
+            body = exc.response.text[:500]
+            if exc.response.status_code >= 500 and attempt < attempts:
+                logger.warning(
+                    "CPA chat image generation attempt "
+                    f"{attempt}/{attempts} failed: HTTP {exc.response.status_code}: {body}. "
+                    "Retrying..."
+                )
+                await asyncio.sleep(retry_delay)
+                continue
+            raise RuntimeError(
+                f"CPA chat image generation failed: HTTP {exc.response.status_code}: {body}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            if attempt >= attempts:
+                raise RuntimeError(f"CPA chat image generation failed: {exc}") from exc
+            logger.warning(
+                f"CPA chat image generation attempt {attempt}/{attempts} failed: {exc}. Retrying..."
+            )
+            await asyncio.sleep(retry_delay)
+
+    image_b64 = extract_openai_chat_image_b64(data)
+    image_bytes = base64.b64decode(image_b64)
+
+    path = Path(output_path).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(image_bytes)
+
+    logger.info(f"✅ Generated CPA chat image: {path}")
     return str(path)
