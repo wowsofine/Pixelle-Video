@@ -29,6 +29,7 @@ from pixelle_video.services.cpa_image import (
     DEFAULT_BASE_URL,
     DEFAULT_IMAGE_MODEL,
     DEFAULT_MAIN_MODEL,
+    DEFAULT_TIMEOUT,
     choose_cpa_image_size,
     generate_cpa_image,
 )
@@ -200,7 +201,7 @@ class MediaService(ComfyBaseService):
             size=size,
             quality=params.get("cpa_quality"),
             output_format=output_format,
-            timeout=float(params.get("cpa_timeout", 120.0)),
+            timeout=float(params.get("cpa_timeout", DEFAULT_TIMEOUT)),
         )
 
         return MediaResult(media_type="image", url=local_path)

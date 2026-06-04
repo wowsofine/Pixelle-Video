@@ -20,6 +20,7 @@ instead of requiring RunningHub or a self-hosted ComfyUI workflow.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 from pathlib import Path
@@ -34,6 +35,9 @@ DEFAULT_IMAGE_MODEL = "gpt-image-2"
 DEFAULT_SQUARE_SIZE = "1024x1024"
 DEFAULT_PORTRAIT_SIZE = "1024x1536"
 DEFAULT_LANDSCAPE_SIZE = "1536x1024"
+DEFAULT_TIMEOUT = 300.0
+DEFAULT_MAX_RETRIES = 2
+DEFAULT_RETRY_DELAY = 2.0
 
 
 def choose_cpa_image_size(width: Optional[int], height: Optional[int]) -> str:
@@ -120,7 +124,9 @@ async def generate_cpa_image(
     size: str = DEFAULT_SQUARE_SIZE,
     quality: Optional[str] = None,
     output_format: Optional[str] = None,
-    timeout: float = 120.0,
+    timeout: float = DEFAULT_TIMEOUT,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_delay: float = DEFAULT_RETRY_DELAY,
 ) -> str:
     """
     Generate an image through the local CPA endpoint and save it to output_path.
@@ -149,18 +155,34 @@ async def generate_cpa_image(
         "Content-Type": "application/json",
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(endpoint, json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-    except httpx.HTTPStatusError as exc:
-        body = exc.response.text[:500]
-        raise RuntimeError(
-            f"CPA image generation failed: HTTP {exc.response.status_code}: {body}"
-        ) from exc
-    except httpx.HTTPError as exc:
-        raise RuntimeError(f"CPA image generation failed: {exc}") from exc
+    attempts = max(1, max_retries + 1)
+    for attempt in range(1, attempts + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(endpoint, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+            break
+        except httpx.HTTPStatusError as exc:
+            body = exc.response.text[:500]
+            if exc.response.status_code >= 500 and attempt < attempts:
+                logger.warning(
+                    "CPA image generation attempt "
+                    f"{attempt}/{attempts} failed: HTTP {exc.response.status_code}: {body}. "
+                    "Retrying..."
+                )
+                await asyncio.sleep(retry_delay)
+                continue
+            raise RuntimeError(
+                f"CPA image generation failed: HTTP {exc.response.status_code}: {body}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            if attempt >= attempts:
+                raise RuntimeError(f"CPA image generation failed: {exc}") from exc
+            logger.warning(
+                f"CPA image generation attempt {attempt}/{attempts} failed: {exc}. Retrying..."
+            )
+            await asyncio.sleep(retry_delay)
 
     image_b64 = extract_image_b64(data)
     image_bytes = base64.b64decode(image_b64)
