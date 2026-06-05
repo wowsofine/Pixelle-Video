@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="template:media-width" content="1080">
+    <meta name="template:media-height" content="1920">
+    <meta name="viewport" content="width=1080, height=1920">
+    <title>CPA full-screen image template</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            width: 1080px;
+            height: 1920px;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: "PingFang SC", "Source Han Sans", "Microsoft YaHei", sans-serif;
+            background: #0e1620;
+            color: #ffffff;
+            position: relative;
+        }
+
+        .scene {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-image: url("{{image}}");
+            background-size: cover;
+            background-position: center;
+        }
+
+        .scene::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(180deg, rgba(4, 9, 15, 0.48) 0%, rgba(4, 9, 15, 0.10) 30%, rgba(4, 9, 15, 0.20) 55%, rgba(4, 9, 15, 0.78) 100%),
+                radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.12), transparent 35%);
+            z-index: 1;
+        }
+
+        .topbar {
+            position: absolute;
+            z-index: 2;
+            top: 68px;
+            left: 58px;
+            right: 58px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: rgba(255, 255, 255, 0.92);
+            text-shadow: 0 3px 16px rgba(0, 0, 0, 0.42);
+        }
+
+        .title {
+            max-width: 720px;
+            font-size: 48px;
+            font-weight: 700;
+            line-height: 1.18;
+            letter-spacing: 0;
+        }
+
+        .mark {
+            padding: 14px 20px;
+            border: 1px solid rgba(255, 255, 255, 0.34);
+            border-radius: 999px;
+            background: rgba(6, 15, 25, 0.34);
+            backdrop-filter: blur(12px);
+            font-size: 25px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .caption-wrap {
+            position: absolute;
+            z-index: 2;
+            left: 56px;
+            right: 56px;
+            bottom: 92px;
+            padding: 34px 38px 38px;
+            border-radius: 28px;
+            background: linear-gradient(180deg, rgba(8, 14, 22, 0.58), rgba(8, 14, 22, 0.78));
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            box-shadow: 0 22px 70px rgba(0, 0, 0, 0.32);
+            backdrop-filter: blur(14px);
+        }
+
+        .caption {
+            font-size: 50px;
+            font-weight: 700;
+            line-height: 1.34;
+            letter-spacing: 0;
+            text-align: center;
+            text-shadow: 0 3px 18px rgba(0, 0, 0, 0.55);
+        }
+
+        .accent-line {
+            position: absolute;
+            z-index: 2;
+            left: 56px;
+            right: 56px;
+            bottom: 62px;
+            height: 3px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, rgba(255, 255, 255, 0.12), rgba(229, 201, 135, 0.92), rgba(255, 255, 255, 0.12));
+        }
+    </style>
+</head>
+<body>
+    <main class="scene">
+        <header class="topbar">
+            <div class="title">{{title}}</div>
+            <div class="mark">{{brand=HK CPA}}</div>
+        </header>
+        <section class="caption-wrap">
+            <div class="caption">{{text}}</div>
+        </section>
+        <div class="accent-line"></div>
+    </main>
+</body>
+</html>
